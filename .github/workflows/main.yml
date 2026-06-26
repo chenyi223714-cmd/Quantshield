@@ -1,0 +1,33 @@
+name: QuantShield Daily Run
+
+on:
+  schedule:
+    # GitHub 使用英國格林威治時間 (UTC)。
+    # 這裡設定 UTC 07:30，等於台灣時間下午 15:30 執行。
+    - cron: '30 7 * * *'
+  workflow_dispatch: # 加上這行，你的頁面上會出現一個按鈕，讓你隨時可以手動點擊執行測試！
+
+jobs:
+  run-quant-script:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 下載你的程式碼
+        uses: actions/checkout@v3
+        
+      - name: 安裝 Python 環境
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: 安裝台股量化與畫圖套件
+        run: |
+          pip install yfinance pandas matplotlib requests
+          
+      - name: 發射 QuantShield 雷達！
+        env:
+          # 從剛才設定的 Secrets 保險箱提取密碼給 Python 使用
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
+        run: |
+          python daily_quant_worker.py
