@@ -124,11 +124,16 @@ def fetch_google_news(keyword):
 # ==========================================
 # 郵件發送模組 (拆分為量化報表與新聞報表)
 # ==========================================
-def send_email(sender_email, app_password, recipient_email, subject, html_content):
+def send_email(sender_email, app_password, recipient_emails, subject, html_content):
     msg = MIMEMultipart('related')
     msg['Subject'] = subject
     msg['From'] = sender_email
-    msg['To'] = recipient_email
+    
+    # 判斷收件人是一個(字串)還是多個(清單)，並用逗號串接起來
+    if isinstance(recipient_emails, list):
+        msg['To'] = ", ".join(recipient_emails)
+    else:
+        msg['To'] = recipient_emails
     msg.attach(MIMEText(html_content, 'html'))
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -143,7 +148,11 @@ def send_email(sender_email, app_password, recipient_email, subject, html_conten
 if __name__ == "__main__":
     SENDER = os.environ.get("GMAIL_USER")
     PASSWORD = os.environ.get("GMAIL_PASS")
-    RECIPIENT = os.environ.get("GMAIL_USER") 
+    
+    # 📝 你的訂閱者名單 (用中括號包起來，每個信箱用引號，並用逗號隔開)
+    SUBSCRIBERS = [
+        SENDER                       
+    ]
     
     print("啟動全能量化系統...")
     # 1. 先執行一次最耗時的運算與抓資料
@@ -174,7 +183,7 @@ if __name__ == "__main__":
         <div style="background-color: #1f2937; padding: 15px; border-radius: 8px;">{analysis_text}</div>
     </body></html>
     """
-    send_email(SENDER, PASSWORD, RECIPIENT, f"📊 QuantShield 全能雷達 ({datetime.now().strftime('%m/%d')})", quant_html)
+    send_email(SENDER, PASSWORD, SUBSCRIBERS, f"📊 QuantShield 全能雷達 ({datetime.now().strftime('%m/%d')})", quant_html)
     
     # ---------------------------------------------------------
     # 📰 發送第二封信：情資新聞報表 (為三區股票抓取新聞)
@@ -207,4 +216,4 @@ if __name__ == "__main__":
         </div>
     </body></html>
     """
-    send_email(SENDER, PASSWORD, RECIPIENT, f"📰 QuantShield 每日情資簡報 ({datetime.now().strftime('%m/%d')})", news_html)
+    send_email(SENDER, PASSWORD, SUBSCRIBERS, f"📰 QuantShield 每日情資簡報 ({datetime.now().strftime('%m/%d')})", news_html)
