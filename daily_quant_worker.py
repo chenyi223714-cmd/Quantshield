@@ -2,19 +2,14 @@ import os
 import requests
 import pandas as pd
 import yfinance as yf
-import matplotlib.pyplot as plt
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.image import MIMEImage
-import io
 from datetime import datetime
 
 # ==========================================
-# ⚙️ 系統設定區 (未來你只需要改這裡)
+# ⚙️ 第一區：核心防禦 (長線存股，只買不賣)
 # ==========================================
-
-# 1. 核心防禦與攻擊：定期定額 ETF (長線存股，只買不賣)
 STUDENT_ETFS = {
     '006208.TW': '富邦台50 (台股大盤，穩健底層)',
     '00878.TW': '國泰永續高股息 (ESG高息，抗跌防禦)',
@@ -24,14 +19,16 @@ STUDENT_ETFS = {
     '00662.TW': '富邦NASDAQ (美股科技大盤，長線趨勢)'
 }
 
-# 2. 衛星部隊：個人持股健檢 (移動停利雷達)
-# 格式：'代號.TW': {'name': '名稱', 'buy_date': '買進日期(YYYY-MM-DD)', 'trailing_stop': 回檔容忍度(0.10代表10%)}
-# 如果目前空手，裡面留空即可。未來買進後再回來加上去。
+# ==========================================
+# ⚙️ 第二區：個人持股健檢 (移動停利雷達)
+# ==========================================
 MY_PORTFOLIO = {
-    # 範例 (請把前面的 # 拿掉即可啟用)：
+    # 未來如果有買進股票，就把前面的 # 拿掉並改成你的股票
     # '2330.TW': {'name': '台積電', 'buy_date': '2026-06-01', 'trailing_stop': 0.10}
 }
 
+# ==========================================
+# 以下為系統核心運算區，未來不需更動
 # ==========================================
 
 def calculate_rsi(data, window=14):
@@ -50,7 +47,6 @@ def check_portfolio_health():
     results_html += "<ul>"
     for ticker, info in MY_PORTFOLIO.items():
         stock = yf.Ticker(ticker)
-        # 抓取從買進日到今天的歷史股價
         hist = stock.history(start=info['buy_date']).dropna(subset=['Close'])
         
         if hist.empty:
@@ -59,31 +55,36 @@ def check_portfolio_health():
             
         current_price = round(hist['Close'].iloc[-1], 2)
         max_price = round(hist['Close'].max(), 2)
-        # 計算從最高點跌下來的幅度
         drawdown = (max_price - current_price) / max_price
         
-        # 判斷是否觸發賣出訊號
         if drawdown >= info['trailing_stop']:
             status_text = f"<span style='color:#ef4444; font-weight:bold;'>🔴 觸發賣出 (回檔 {(drawdown*100):.1f}%)</span>"
         else:
             status_text = f"<span style='color:#10b981;'>🟢 安全續抱 (回檔 {(drawdown*100):.1f}%)</span>"
             
         results_html += (f"<li><b>{ticker} {info['name']}</b>："
-                         f"買進後最高 <b>{max_price}</b> 元 | "
+                         f"買後最高 <b>{max_price}</b> 元 | "
                          f"現價 <b>{current_price}</b> 元 | {status_text}</li>")
     results_html += "</ul>"
     return results_html
 
 def screen_multi_factor_stocks():
+    """多因子模型 + 防彈機制"""
     print("啟動證交所價值初篩...")
     url = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    res = requests.get(url, headers=headers)
     
+    # 戴上最完整的瀏覽器面具
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    # 🛡️ 終極防彈衣：如果被證交所擋住，優雅退場不當機
     try:
+        res = requests.get(url, headers=headers, timeout=10)
         df = pd.DataFrame(res.json())
     except Exception as e:
-        print("證交所資料解析失敗，可能為假日或IP阻擋。")
+        print(f"🚨 證交所資料解析失敗 (被擋 IP 或假日無資料)：{e}")
+        # 回傳空表，讓系統繼續寄送 ETF 和健檢報表
         return pd.DataFrame(columns=['Code', 'Name', 'DividendYield', 'RSI'])
         
     df['PEratio'] = pd.to_numeric(df['PEratio'], errors='coerce')
@@ -125,7 +126,6 @@ def send_daily_email(sender_email, app_password, recipient_email):
     portfolio_html = check_portfolio_health()
     final_stocks_df = screen_multi_factor_stocks()
     
-    # 處理第一區與第三區圖表文字
     analysis_text = "<h4>📊 第一區：核心 ETF (長線存股，只買不賣)</h4><ul>"
     for ticker, name in STUDENT_ETFS.items():
         stock = yf.Ticker(ticker)
@@ -136,7 +136,7 @@ def send_daily_email(sender_email, app_password, recipient_email):
             
     analysis_text += "</ul><h4>🎯 第三區：盤後尋寶 (適合建倉新標的)</h4><ul>"
     if final_stocks_df.empty:
-        analysis_text += "<p style='color:#9ca3af;'>今日大盤無符合嚴格價值與動能之標的。</p>"
+        analysis_text += "<p style='color:#9ca3af;'>今日大盤無符合嚴格價值與動能之標的 (或證交所連線異常)。</p>"
     else:
         for index, row in final_stocks_df.iterrows():
             ticker = f"{row['Code']}.TW"
