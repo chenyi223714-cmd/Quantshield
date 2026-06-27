@@ -32,9 +32,23 @@ def screen_multi_factor_stocks():
     """多因子模型：價值初篩 -> 技術面與動能複篩"""
     print("啟動證交所價值初篩...")
     url = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
-    res = requests.get(url)
-    df = pd.DataFrame(res.json())
     
+    # 🛡️ 升級防禦：戴上面具，偽裝成正常的 Windows 電腦與 Chrome 瀏覽器
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    res = requests.get(url, headers=headers)
+    
+    # 🛑 防彈機制：如果證交所擋住我們，或週末維護沒給資料，程式不當機，優雅退場
+    try:
+        df = pd.DataFrame(res.json())
+    except Exception as e:
+        print("🚨 證交所資料解析失敗！可能原因：GitHub海外 IP 被擋，或週末伺服器維護。")
+        print(f"證交所實際回傳的內容是：{res.text[:300]}")
+        # 如果失敗，回傳一個空資料表，讓系統不會死掉，至少你的信件還能收到 ETF 的數據
+        return pd.DataFrame(columns=['Code', 'Name', 'DividendYield', 'RSI'])
+        
     df['PEratio'] = pd.to_numeric(df['PEratio'], errors='coerce')
     df['DividendYield'] = pd.to_numeric(df['DividendYield'], errors='coerce')
     df['PBratio'] = pd.to_numeric(df['PBratio'], errors='coerce')
@@ -44,11 +58,11 @@ def screen_multi_factor_stocks():
                 (df['DividendYield'] > 5.0) & \
                 (df['PBratio'] < 1.5)
     
-    # 先抓出前 30 名，準備進入第二階段面試
     candidate_stocks = df[condition].sort_values(by='DividendYield', ascending=False).head(30)
-    
     final_stocks = []
     print("啟動 Yahoo Finance 動能複篩...")
+    
+    # ... (下方迴圈 for index, row in candidate_stocks.iterrows(): 的部分維持你原本的即可)
     
     for index, row in candidate_stocks.iterrows():
         if len(final_stocks) >= 5: # 找到 5 檔就收工
