@@ -30,4 +30,4 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
         run: |
-          python daily_quant_worker.py
+          py daily_quant_worker.py
