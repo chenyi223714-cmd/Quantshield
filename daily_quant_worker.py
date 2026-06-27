@@ -6,29 +6,30 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
+import urllib.parse
+import xml.etree.ElementTree as ET
 
 # ==========================================
 # ⚙️ 第一區：核心防禦 (長線存股，只買不賣)
 # ==========================================
 STUDENT_ETFS = {
-    '006208.TW': '富邦台50 (台股大盤，穩健底層)',
-    '00878.TW': '國泰永續高股息 (ESG高息，抗跌防禦)',
-    '00713.TW': '元大台灣高息低波 (聰明選股，高息且低波動)',
-    '00919.TW': '群益精選高息 (積極型高息，高殖利率攻擊)',
-    '00757.TW': '統一FANG+ (美股10大科技巨頭，極致爆發力)',
-    '00662.TW': '富邦NASDAQ (美股科技大盤，長線趨勢)'
+    '006208.TW': '富邦台50',
+    '00878.TW': '國泰永續高股息',
+    '00713.TW': '元大台灣高息低波',
+    '00919.TW': '群益精選高息',
+    '00757.TW': '統一FANG+',
+    '00662.TW': '富邦NASDAQ'
 }
 
 # ==========================================
 # ⚙️ 第二區：個人持股健檢 (移動停利雷達)
 # ==========================================
 MY_PORTFOLIO = {
-    # 未來如果有買進股票，就把前面的 # 拿掉並改成你的股票
     # '2330.TW': {'name': '台積電', 'buy_date': '2026-06-01', 'trailing_stop': 0.10}
 }
 
 # ==========================================
-# 以下為系統核心運算區，未來不需更動
+# 系統核心運算區
 # ==========================================
 
 def calculate_rsi(data, window=14):
@@ -39,7 +40,6 @@ def calculate_rsi(data, window=14):
     return 100 - (100 / (1 + rs))
 
 def check_portfolio_health():
-    """檢查個人持股，計算是否觸發移動停利，並提供建議賣價"""
     results_html = ""
     if not MY_PORTFOLIO:
         return "<p style='color:#9ca3af;'>目前無個股持倉，維持空手紀律。</p>"
@@ -48,16 +48,11 @@ def check_portfolio_health():
     for ticker, info in MY_PORTFOLIO.items():
         stock = yf.Ticker(ticker)
         hist = stock.history(start=info['buy_date']).dropna(subset=['Close'])
-        
         if hist.empty:
-            results_html += f"<li>{info['name']}：查無資料</li>"
             continue
-            
         current_price = round(hist['Close'].iloc[-1], 2)
         max_price = round(hist['Close'].max(), 2)
         drawdown = (max_price - current_price) / max_price
-        
-        # 💡 報價插件：計算精準的「停利觸發底線價」
         trigger_price = round(max_price * (1 - info['trailing_stop']), 2)
         
         if drawdown >= info['trailing_stop']:
@@ -65,131 +60,151 @@ def check_portfolio_health():
         else:
             status_text = f"<span style='color:#10b981;'>🟢 安全續抱 (跌破 {trigger_price} 元時將觸發賣出)</span>"
             
-        results_html += (f"<li><b>{ticker} {info['name']}</b>："
-                         f"買後最高 <b>{max_price}</b> 元 | "
-                         f"現價 <b>{current_price}</b> 元 | {status_text}</li>")
+        results_html += (f"<li><b>{ticker} {info['name']}</b>：現價 <b>{current_price}</b> 元 | {status_text}</li>")
     results_html += "</ul>"
     return results_html
 
 def screen_multi_factor_stocks():
-    """多因子模型 + 防彈機制"""
     print("啟動證交所價值初篩...")
     url = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
-    # 戴上最完整的瀏覽器面具
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
-    
-    # 🛡️ 終極防彈衣：如果被證交所擋住，優雅退場不當機
     try:
         res = requests.get(url, headers=headers, timeout=10)
         df = pd.DataFrame(res.json())
     except Exception as e:
-        print(f"🚨 證交所資料解析失敗 (被擋 IP 或假日無資料)：{e}")
-        # 回傳空表，讓系統繼續寄送 ETF 和健檢報表
+        print(f"🚨 證交所資料解析失敗：{e}")
         return pd.DataFrame(columns=['Code', 'Name', 'DividendYield', 'RSI'])
         
     df['PEratio'] = pd.to_numeric(df['PEratio'], errors='coerce')
     df['DividendYield'] = pd.to_numeric(df['DividendYield'], errors='coerce')
     df['PBratio'] = pd.to_numeric(df['PBratio'], errors='coerce')
     
-    condition = (df['PEratio'] > 0) & (df['PEratio'] < 15) & \
-                (df['DividendYield'] > 5.0) & \
-                (df['PBratio'] < 1.5)
-    
+    condition = (df['PEratio'] > 0) & (df['PEratio'] < 15) & (df['DividendYield'] > 5.0) & (df['PBratio'] < 1.5)
     candidate_stocks = df[condition].sort_values(by='DividendYield', ascending=False).head(30)
     final_stocks = []
     
     for index, row in candidate_stocks.iterrows():
-        if len(final_stocks) >= 5: 
-            break
+        if len(final_stocks) >= 5: break
         ticker = f"{row['Code']}.TW"
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="3mo").dropna(subset=['Close'])
-        
+        hist = yf.Ticker(ticker).history(period="3mo").dropna(subset=['Close'])
         if len(hist) < 25: continue
         current_price = hist['Close'].iloc[-1]
         ma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
-        
         if current_price < ma_20: continue
-            
-        rsi_series = calculate_rsi(hist['Close'])
-        current_rsi = rsi_series.iloc[-1]
-        
+        current_rsi = calculate_rsi(hist['Close']).iloc[-1]
         if pd.isna(current_rsi) or current_rsi > 50: continue
             
         row['RSI'] = round(current_rsi, 1)
         final_stocks.append(row)
-
     return pd.DataFrame(final_stocks)
 
-def send_daily_email(sender_email, app_password, recipient_email):
-    print("啟動全能量化系統...")
-    portfolio_html = check_portfolio_health()
-    final_stocks_df = screen_multi_factor_stocks()
-    
-    analysis_text = "<h4>📊 第一區：核心 ETF (長線存股，只買不賣)</h4><ul>"
-    for ticker, name in STUDENT_ETFS.items():
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="1mo").dropna(subset=['Close'])
-        if not hist.empty:
-            current_price = round(hist['Close'].iloc[-1], 2)
-            analysis_text += f"<li><b>{ticker} {name}</b>：現價 {current_price} 元</li>"
-            
-    analysis_text += "</ul><h4>🎯 第三區：盤後尋寶 (適合建倉新標的)</h4><ul>"
-    if final_stocks_df.empty:
-        analysis_text += "<p style='color:#9ca3af;'>今日大盤無符合嚴格價值與動能之標的 (或證交所連線異常)。</p>"
-    else:
-        for index, row in final_stocks_df.iterrows():
-            ticker = f"{row['Code']}.TW"
-            stock = yf.Ticker(ticker)
-            hist = stock.history(period="1d").dropna(subset=['Close'])
-            current_price = round(hist['Close'].iloc[-1], 2) if not hist.empty else "N/A"
-            
-            # 💡 報價插件：提示隔日的掛單限價
-            analysis_text += (f"<li><b>{row['Code']} {row['Name']}</b>：現價 {current_price} 元 | "
-                              f"殖利率 <span style='color:#10b981;'><b>{row['DividendYield']}%</b></span> | "
-                              f"RSI <span style='color:#60a5fa;'><b>{row['RSI']}</b></span><br>"
-                              f"<span style='color:#fcd34d; font-size:0.9em;'>👉 建議買入掛單：<b>限價 {current_price} 元</b> (以昨日收盤價為基準)</span></li>")
-    analysis_text += "</ul>"
+# ==========================================
+# 🆕 新增：Google 新聞爬蟲引擎
+# ==========================================
+def fetch_google_news(keyword):
+    """透過 Google News RSS 抓取繁體中文新聞"""
+    encoded_kw = urllib.parse.quote(f"{keyword} 股票 OR 營收")
+    url = f"https://news.google.com/rss/search?q={encoded_kw}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
+    news_html = ""
+    try:
+        res = requests.get(url, timeout=5)
+        root = ET.fromstring(res.text)
+        items = root.findall('./channel/item')[:3] # 只取前 3 則最新新聞
+        for item in items:
+            title = item.find('title').text
+            link = item.find('link').text
+            news_html += f"<li style='margin-bottom: 8px;'><a href='{link}' style='color:#60a5fa; text-decoration:none;'>{title}</a></li>"
+        if not news_html:
+            return "<li style='color:#9ca3af;'>今日無重大新聞</li>"
+        return news_html
+    except Exception:
+        return "<li style='color:#ef4444;'>新聞抓取失敗</li>"
 
+# ==========================================
+# 郵件發送模組 (拆分為量化報表與新聞報表)
+# ==========================================
+def send_email(sender_email, app_password, recipient_email, subject, html_content):
     msg = MIMEMultipart('related')
-    msg['Subject'] = f"📊 QuantShield 全能雷達：存股+健檢+尋寶 ({datetime.now().strftime('%m/%d')})"
+    msg['Subject'] = subject
     msg['From'] = sender_email
     msg['To'] = recipient_email
-
-    html_content = f"""
-    <html>
-      <body style="font-family: Arial, sans-serif; background-color: #111827; color: #e5e7eb; padding: 20px;">
-        <h2 style="color: #10b981;">QuantShield 個人量化交易中心</h2>
-        
-        <div style="background-color: #374151; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b; margin-bottom: 20px;">
-            <h4 style="margin-top:0; color:#fcd34d;">🚨 第二區：個人持股移動停利雷達 (策略C)</h4>
-            {portfolio_html}
-        </div>
-
-        <div style="background-color: #1f2937; padding: 15px; border-radius: 8px;">
-            {analysis_text}
-        </div>
-      </body>
-    </html>
-    """
-    
     msg.attach(MIMEText(html_content, 'html'))
-    
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(sender_email, app_password)
         server.send_message(msg)
         server.quit()
-        print("✅ 郵件發送成功！")
+        print(f"✅ 郵件發送成功：{subject}")
     except Exception as e:
         print(f"❌ 發送失敗：{e}")
+
 if __name__ == "__main__":
     SENDER = os.environ.get("GMAIL_USER")
     PASSWORD = os.environ.get("GMAIL_PASS")
     RECIPIENT = os.environ.get("GMAIL_USER") 
     
-    send_daily_email(SENDER, PASSWORD, RECIPIENT)
+    print("啟動全能量化系統...")
+    # 1. 先執行一次最耗時的運算與抓資料
+    portfolio_html = check_portfolio_health()
+    final_stocks_df = screen_multi_factor_stocks()
+    
+    # ---------------------------------------------------------
+    # 📧 發送第一封信：量化交易報表 (與之前相同)
+    # ---------------------------------------------------------
+    analysis_text = "<h4>📊 第一區：核心 ETF</h4><ul>"
+    for ticker, name in STUDENT_ETFS.items():
+        analysis_text += f"<li><b>{ticker} {name}</b></li>"
+    analysis_text += "</ul><h4>🎯 第三區：盤後尋寶</h4><ul>"
+    
+    if final_stocks_df.empty:
+        analysis_text += "<p style='color:#9ca3af;'>今日大盤無符合嚴格條件之標的。</p>"
+    else:
+        for index, row in final_stocks_df.iterrows():
+            analysis_text += f"<li><b>{row['Code']} {row['Name']}</b>：限價 {row['Close'] if 'Close' in row else '現價'} 元買進</li>"
+    analysis_text += "</ul>"
+
+    quant_html = f"""
+    <html><body style="font-family: Arial; background-color: #111827; color: #e5e7eb; padding: 20px;">
+        <h2 style="color: #10b981;">QuantShield 量化交易中心</h2>
+        <div style="background-color: #374151; padding: 15px; border-radius: 8px; border-left: 5px solid #f59e0b; margin-bottom: 20px;">
+            <h4 style="margin-top:0; color:#fcd34d;">🚨 第二區：移動停利雷達</h4>{portfolio_html}
+        </div>
+        <div style="background-color: #1f2937; padding: 15px; border-radius: 8px;">{analysis_text}</div>
+    </body></html>
+    """
+    send_email(SENDER, PASSWORD, RECIPIENT, f"📊 QuantShield 全能雷達 ({datetime.now().strftime('%m/%d')})", quant_html)
+    
+    # ---------------------------------------------------------
+    # 📰 發送第二封信：情資新聞報表 (為三區股票抓取新聞)
+    # ---------------------------------------------------------
+    print("啟動 Google 新聞爬蟲...")
+    news_content = "<h4>📊 第一區：ETF 相關新聞</h4>"
+    for ticker, name in STUDENT_ETFS.items():
+        news_content += f"<p><b>{name}</b></p><ul>{fetch_google_news(name)}</ul>"
+        
+    news_content += "<h4>🚨 第二區：持股重大訊息</h4>"
+    if not MY_PORTFOLIO:
+        news_content += "<p style='color:#9ca3af;'>目前無個股持倉。</p>"
+    else:
+        for ticker, info in MY_PORTFOLIO.items():
+            news_content += f"<p><b>{info['name']}</b></p><ul>{fetch_google_news(info['name'])}</ul>"
+            
+    news_content += "<h4>🎯 第三區：尋寶名單情資</h4>"
+    if final_stocks_df.empty:
+        news_content += "<p style='color:#9ca3af;'>今日無尋寶標的，暫無新聞。</p>"
+    else:
+        for index, row in final_stocks_df.iterrows():
+            news_content += f"<p><b>{row['Name']}</b></p><ul>{fetch_google_news(row['Name'])}</ul>"
+
+    news_html = f"""
+    <html><body style="font-family: Arial; background-color: #1e1b4b; color: #e5e7eb; padding: 20px;">
+        <h2 style="color: #818cf8;">📰 QuantShield 每日情資簡報</h2>
+        <div style="background-color: #312e81; padding: 15px; border-radius: 8px;">
+            <p>以下為系統針對您雷達中的標的，自動彙整的最新 Google 財經新聞：</p>
+            {news_content}
+        </div>
+    </body></html>
+    """
+    send_email(SENDER, PASSWORD, RECIPIENT, f"📰 QuantShield 每日情資簡報 ({datetime.now().strftime('%m/%d')})", news_html)
