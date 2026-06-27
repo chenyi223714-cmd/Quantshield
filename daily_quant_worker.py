@@ -39,7 +39,7 @@ def calculate_rsi(data, window=14):
     return 100 - (100 / (1 + rs))
 
 def check_portfolio_health():
-    """檢查個人持股，計算是否觸發移動停利"""
+    """檢查個人持股，計算是否觸發移動停利，並提供建議賣價"""
     results_html = ""
     if not MY_PORTFOLIO:
         return "<p style='color:#9ca3af;'>目前無個股持倉，維持空手紀律。</p>"
@@ -57,10 +57,13 @@ def check_portfolio_health():
         max_price = round(hist['Close'].max(), 2)
         drawdown = (max_price - current_price) / max_price
         
+        # 💡 報價插件：計算精準的「停利觸發底線價」
+        trigger_price = round(max_price * (1 - info['trailing_stop']), 2)
+        
         if drawdown >= info['trailing_stop']:
-            status_text = f"<span style='color:#ef4444; font-weight:bold;'>🔴 觸發賣出 (回檔 {(drawdown*100):.1f}%)</span>"
+            status_text = f"<span style='color:#ef4444; font-weight:bold;'>🔴 觸發賣出 (請用限價 {trigger_price} 元賣出)</span>"
         else:
-            status_text = f"<span style='color:#10b981;'>🟢 安全續抱 (回檔 {(drawdown*100):.1f}%)</span>"
+            status_text = f"<span style='color:#10b981;'>🟢 安全續抱 (跌破 {trigger_price} 元時將觸發賣出)</span>"
             
         results_html += (f"<li><b>{ticker} {info['name']}</b>："
                          f"買後最高 <b>{max_price}</b> 元 | "
@@ -143,9 +146,12 @@ def send_daily_email(sender_email, app_password, recipient_email):
             stock = yf.Ticker(ticker)
             hist = stock.history(period="1d").dropna(subset=['Close'])
             current_price = round(hist['Close'].iloc[-1], 2) if not hist.empty else "N/A"
+            
+            # 💡 報價插件：提示隔日的掛單限價
             analysis_text += (f"<li><b>{row['Code']} {row['Name']}</b>：現價 {current_price} 元 | "
                               f"殖利率 <span style='color:#10b981;'><b>{row['DividendYield']}%</b></span> | "
-                              f"RSI <span style='color:#60a5fa;'><b>{row['RSI']}</b></span></li>")
+                              f"RSI <span style='color:#60a5fa;'><b>{row['RSI']}</b></span><br>"
+                              f"<span style='color:#fcd34d; font-size:0.9em;'>👉 建議買入掛單：<b>限價 {current_price} 元</b> (以昨日收盤價為基準)</span></li>")
     analysis_text += "</ul>"
 
     msg = MIMEMultipart('related')
@@ -181,7 +187,6 @@ def send_daily_email(sender_email, app_password, recipient_email):
         print("✅ 郵件發送成功！")
     except Exception as e:
         print(f"❌ 發送失敗：{e}")
-
 if __name__ == "__main__":
     SENDER = os.environ.get("GMAIL_USER")
     PASSWORD = os.environ.get("GMAIL_PASS")
