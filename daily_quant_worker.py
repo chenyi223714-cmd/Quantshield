@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from datetime import datetime
 import urllib.parse
 import xml.etree.ElementTree as ET
+import time
 
 # ==========================================
 # ⚙️ 第一區：核心防禦 (長線存股，只買不賣)
@@ -69,11 +70,32 @@ def screen_multi_factor_stocks():
     url = "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        df = pd.DataFrame(res.json())
-    except Exception as e:
-        print(f"🚨 證交所資料解析失敗：{e}")
+    # 💡 企業級重試機制：最多挑戰 3 次
+    max_retries = 3
+    df = pd.DataFrame() # 先建立空表格
+    
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(url, headers=headers, timeout=10)
+            # 檢查對方是不是給我們正常的網頁 (200 代表成功)
+            if res.status_code == 200:
+                df = pd.DataFrame(res.json())
+                print(f"✅ 第 {attempt + 1} 次嘗試：成功取得證交所資料！")
+                break # 成功就跳出迴圈，不繼續重試了
+            else:
+                print(f"⚠️ 第 {attempt + 1} 次嘗試：證交所伺服器異常 (狀態碼: {res.status_code})")
+        
+        except Exception as e:
+            print(f"⚠️ 第 {attempt + 1} 次嘗試失敗：{e}")
+            
+        # 如果還沒到最後一次，就等 5 秒再試
+        if attempt < max_retries - 1:
+            print("⏳ 休息 5 秒後重新敲門...")
+            time.sleep(5)
+            
+    # 如果試了 3 次還是失敗，就真的放棄
+    if df.empty:
+        print("🚨 連續 3 次遭證交所拒絕，今日放棄抓取尋寶名單。")
         return pd.DataFrame(columns=['Code', 'Name', 'DividendYield', 'RSI'])
         
     df['PEratio'] = pd.to_numeric(df['PEratio'], errors='coerce')
