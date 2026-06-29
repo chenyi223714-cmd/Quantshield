@@ -3,7 +3,7 @@ name: QuantShield Daily Worker
 on:
   schedule:
     # 這是世界協調時 (UTC) 13:55，剛好是台灣時間 (UTC+8) 晚上 21:55
-    - cron: '11 15 * * 1-5'
+    - cron: '26 14 * * 1-5'
   workflow_dispatch:
 
 jobs:
